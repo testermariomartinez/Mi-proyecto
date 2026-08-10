@@ -1,0 +1,86 @@
+name: GitHub Pages — Docs Hub
+
+# Publishes the learning hub to gh-pages:
+#   /            -> homepage dashboard (packages/pages-home)
+#   /kata/       -> KATA Academy build (packages/kata-academy)
+#   /decks/      -> how-it-works + curriculum decks from packages/decks/
+#   /<env>/regression/ -> Allure reports (owned by regression.yml — NEVER touched here;
+#                         keep_files: true preserves them on every deploy)
+#
+# packages/decks/ is the canonical source for the published site. The copies
+# still living in .claude/skills/*/ are kept for external consumers and will
+# be removed in a later phase (see packages/decks/README.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/kata-academy/**'
+      - 'packages/pages-home/**'
+      - 'packages/decks/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-docs-hub
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    name: Build & Deploy Docs Hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Academy Dependencies
+        working-directory: packages/kata-academy
+        run: bun install --frozen-lockfile
+
+      - name: Type-check Academy
+        working-directory: packages/kata-academy
+        run: bun run check
+
+      - name: Build Academy
+        working-directory: packages/kata-academy
+        run: bun run build
+
+      - name: Assemble Site
+        run: |
+          mkdir -p _site/kata _site/decks
+          touch _site/.nojekyll
+
+          # Homepage dashboard
+          cp packages/pages-home/index.html _site/index.html
+
+          # KATA Academy (built with base: './' so it works under /kata/)
+          cp -R packages/kata-academy/dist/. _site/kata/
+
+          # Decks: every HTML deck in packages/decks/<skill>/ -> /decks/<skill>/
+          cp -R packages/decks/. _site/decks/
+          rm -f _site/decks/README.md
+
+          echo "Site tree:"
+          find _site -maxdepth 2 -type d | sort
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: _site
+          keep_files: true
+
+      - name: Post Site URL
+        run: |
+          echo "## Docs Hub" >> $GITHUB_STEP_SUMMARY
+          echo "Homepage: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
+          echo "KATA Academy: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/kata/" >> $GITHUB_STEP_SUMMARY
